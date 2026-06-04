@@ -10,6 +10,7 @@ const SearchNewsSchema = z.object({
   dateTo: z.string().optional(),
   sentimentFilter: z.string().optional(),
   includeSentiment: z.boolean().optional(),
+  sortBy: z.enum(['similarity', 'date']).optional(),
 });
 
 export const searchNewsTool = {
@@ -51,6 +52,11 @@ export const searchNewsTool = {
         type: 'boolean',
         description: 'Include sentiment data in results',
       },
+      sortBy: {
+        type: 'string',
+        enum: ['similarity', 'date'],
+        description: 'Sort results by similarity score (default) or date (newest first)',
+      },
     },
     required: ['query'],
   },
@@ -70,6 +76,7 @@ export async function handleSearchNews(
     dateTo: params.dateTo ? new Date(params.dateTo) : undefined,
     sentimentFilter: params.sentimentFilter,
     includeSentiment: params.includeSentiment,
+    sortBy: params.sortBy,
   });
 
   const formatted = {

@@ -12,6 +12,7 @@ export interface SearchOptions {
   dateTo?: Date;
   sentimentFilter?: string;
   includeSentiment?: boolean;
+  sortBy?: 'similarity' | 'date';
 }
 
 export class SearchService {
@@ -41,9 +42,10 @@ export class SearchService {
       dateTo,
       sentimentFilter,
       includeSentiment = false,
+      sortBy = 'similarity',
     } = options;
 
-    logger.info('Searching articles', { query, limit, minSimilarity });
+    logger.info('Searching articles', { query, limit, minSimilarity, sortBy });
     const start = Date.now();
 
     const embeddingResult = await this.embeddingService.generateEmbedding(query);
@@ -54,7 +56,8 @@ export class SearchService {
       minSimilarity,
       sourceIds,
       dateFrom,
-      dateTo
+      dateTo,
+      sortBy
     );
 
     if (sentimentFilter || includeSentiment) {

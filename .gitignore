@@ -47,3 +47,6 @@ models/
 *.db
 *.sqlite
 *.sqlite3
+
+# Internal notes and docs
+notes/

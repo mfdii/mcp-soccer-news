@@ -96,7 +96,8 @@ export class ArticleRepository {
     minSimilarity: number = 0.5,
     sourceIds?: number[],
     dateFrom?: Date,
-    dateTo?: Date
+    dateTo?: Date,
+    sortBy: 'similarity' | 'date' = 'similarity'
   ): Promise<SearchResult[]> {
     let queryText = `SELECT * FROM articles WHERE embedding IS NOT NULL`;
     const params: unknown[] = [];
@@ -145,11 +146,45 @@ export class ArticleRepository {
           return null;
         }
       })
-      .filter((r) => r !== null && r.similarity >= minSimilarity)
-      .sort((a, b) => b!.similarity - a!.similarity)
-      .slice(0, limit) as SearchResult[];
+      .filter((r): r is SearchResult => r !== null && r.similarity >= minSimilarity)
+      .sort((a, b) => {
+        if (sortBy === 'date') {
+          return b.publishedDate.getTime() - a.publishedDate.getTime();
+        }
+        return b.similarity - a.similarity;
+      });
 
-    return resultsWithSimilarity;
+    // Deduplicate by title similarity (avoid returning near-duplicate stories)
+    const uniqueResults: SearchResult[] = [];
+    const seenTitles = new Set<string>();
+
+    for (const result of resultsWithSimilarity) {
+      // Normalize title for comparison
+      const normalizedTitle = result.title
+        .toLowerCase()
+        .replace(/[^\w\s]/g, '')
+        .trim();
+
+      // Check for similar titles (simple approach)
+      let isDuplicate = false;
+      for (const seen of seenTitles) {
+        if (this.titleSimilarity(normalizedTitle, seen) > 0.8) {
+          isDuplicate = true;
+          break;
+        }
+      }
+
+      if (!isDuplicate) {
+        uniqueResults.push(result);
+        seenTitles.add(normalizedTitle);
+
+        if (uniqueResults.length >= limit) {
+          break;
+        }
+      }
+    }
+
+    return uniqueResults;
   }
 
   private cosineSimilarity(a: number[], b: number[]): number {
@@ -169,6 +204,17 @@ export class ArticleRepository {
 
     const magnitude = Math.sqrt(magnitudeA) * Math.sqrt(magnitudeB);
     return magnitude === 0 ? 0 : dotProduct / magnitude;
+  }
+
+  private titleSimilarity(title1: string, title2: string): number {
+    // Simple Jaccard similarity for title deduplication
+    const words1 = new Set(title1.split(/\s+/));
+    const words2 = new Set(title2.split(/\s+/));
+
+    const intersection = new Set([...words1].filter(x => words2.has(x)));
+    const union = new Set([...words1, ...words2]);
+
+    return union.size === 0 ? 0 : intersection.size / union.size;
   }
 
   async count(): Promise<number> {
