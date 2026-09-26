@@ -1,11 +1,8 @@
 #!/usr/bin/env node
+import { McpServer, createMcpHandler } from '@modelcontextprotocol/server';
+import { toNodeHandler } from '@modelcontextprotocol/node';
 import express from 'express';
-import { Server } from '@modelcontextprotocol/sdk/server/index.js';
-import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
-import {
-  CallToolRequestSchema,
-  ListToolsRequestSchema,
-} from '@modelcontextprotocol/sdk/types.js';
+import { z } from 'zod';
 import { logger } from './utils/logger.js';
 import { getPool, closePool } from './database/client.js';
 import { SourceRepository } from './database/repositories/SourceRepository.js';
@@ -18,36 +15,16 @@ import { SentimentService } from './services/SentimentService.js';
 import { SearchService } from './services/SearchService.js';
 import { QuoteSearchService } from './services/QuoteSearchService.js';
 import {
-  fetchFeedsTool,
   handleFetchFeeds,
-  searchNewsTool,
   handleSearchNews,
-  analyzeSentimentTool,
   handleAnalyzeSentiment,
-  listSourcesTool,
   handleListSources,
-  getRecentNewsTool,
   handleGetRecentNews,
-  manageSourcesTool,
   handleManageSources,
-  askSirAlexTool,
   handleAskSirAlex,
-  getRandomQuoteTool,
   handleGetRandomQuote,
-  getQuotesByTopicTool,
   handleGetQuotesByTopic,
 } from './tools/index.js';
-
-const PORT = parseInt(process.env.PORT || '3000');
-const SESSION_TIMEOUT = parseInt(process.env.SESSION_TIMEOUT || '1800000'); // 30 minutes
-
-interface Session {
-  server: Server;
-  transport: StreamableHTTPServerTransport;
-  lastActivity: number;
-}
-
-const sessions = new Map<string, Session>();
 
 const sourceRepo = new SourceRepository();
 const articleRepo = new ArticleRepository();
@@ -64,143 +41,159 @@ const searchService = new SearchService(
 );
 const quoteSearchService = new QuoteSearchService(quoteRepo, embeddingService);
 
-function createServer(): Server {
-  const server = new Server(
-    {
-      name: 'soccer-news-mcp',
-      version: '1.0.0',
-    },
-    {
-      capabilities: {
-        tools: {},
-      },
-    }
+const handler = createMcpHandler(() => {
+  const server = new McpServer(
+    { name: 'soccer-news-mcp', version: '2.0.0' },
+    { capabilities: { tools: {} } },
   );
 
-  server.setRequestHandler(ListToolsRequestSchema, async () => {
-    return {
-      tools: [
-        fetchFeedsTool,
-        searchNewsTool,
-        analyzeSentimentTool,
-        listSourcesTool,
-        getRecentNewsTool,
-        manageSourcesTool,
-        askSirAlexTool,
-        getRandomQuoteTool,
-        getQuotesByTopicTool,
-      ],
-    };
+  server.registerTool('fetch-feeds', {
+    description: 'Fetch and process RSS feeds, store articles with embeddings',
+    inputSchema: {
+      sourceIds: z.array(z.number()).optional().describe('Specific source IDs to fetch (fetches all if omitted)'),
+      maxArticlesPerSource: z.number().optional().describe('Maximum articles per source (default: 20)'),
+      skipEmbeddings: z.boolean().optional().describe('Skip generating embeddings (faster but no semantic search)'),
+    } as any,
+  }, async (args: any) => {
+    const text = await handleFetchFeeds(args, rssFetcher, embeddingService, articleRepo);
+    return { content: [{ type: 'text' as const, text }] };
   });
 
-  server.setRequestHandler(CallToolRequestSchema, async (request) => {
-    const { name, arguments: args } = request.params;
+  server.registerTool('search-news', {
+    description: 'Semantic search across stored articles using vector similarity',
+    inputSchema: {
+      query: z.string().describe('Search query (natural language)'),
+      limit: z.number().optional().describe('Maximum results to return (default: 10)'),
+      minSimilarity: z.number().optional().describe('Minimum similarity score 0-1 (default: 0.3)'),
+      sourceIds: z.array(z.number()).optional().describe('Filter by specific source IDs'),
+      dateFrom: z.string().optional().describe('Filter articles from this date (ISO format)'),
+      dateTo: z.string().optional().describe('Filter articles until this date (ISO format)'),
+      sentimentFilter: z.string().optional().describe('Filter by sentiment (positive, negative, neutral)'),
+      includeSentiment: z.boolean().optional().describe('Include sentiment analysis in results'),
+      sortBy: z.enum(['similarity', 'date']).optional().describe('Sort results by similarity or date'),
+    } as any,
+  }, async (args: any) => {
+    const text = await handleSearchNews(args, searchService);
+    return { content: [{ type: 'text' as const, text }] };
+  });
 
-    logger.info('Tool call', { tool: name });
+  server.registerTool('analyze-sentiment', {
+    description: 'Analyze sentiment for specific articles',
+    inputSchema: {
+      articleIds: z.array(z.number()).optional().describe('Specific article IDs to analyze'),
+      limit: z.number().optional().describe('Number of unanalyzed articles to process (default: 10)'),
+      reanalyze: z.boolean().optional().describe('Re-analyze articles that already have sentiment'),
+    } as any,
+  }, async (args: any) => {
+    const text = await handleAnalyzeSentiment(args, sentimentService, articleRepo, sentimentRepo);
+    return { content: [{ type: 'text' as const, text }] };
+  });
 
-    try {
-      let result: string;
+  server.registerTool('list-sources', {
+    description: 'List configured RSS feed sources with statistics',
+    inputSchema: {
+      activeOnly: z.boolean().optional().describe('Only show active sources (default: false)'),
+    } as any,
+  }, async (args: any) => {
+    const text = await handleListSources(args, sourceRepo);
+    return { content: [{ type: 'text' as const, text }] };
+  });
 
-      switch (name) {
-        case 'fetch-feeds':
-          result = await handleFetchFeeds(
-            args,
-            rssFetcher,
-            embeddingService,
-            articleRepo
-          );
-          break;
+  server.registerTool('get-recent-news', {
+    description: 'Get most recent articles without semantic search (simple time-based)',
+    inputSchema: {
+      limit: z.number().optional().describe('Number of articles to return (default: 10)'),
+      sourceIds: z.array(z.number()).optional().describe('Filter by specific source IDs'),
+      hoursBack: z.number().optional().describe('Only articles from the last N hours'),
+      includeSentiment: z.boolean().optional().describe('Include sentiment analysis in results'),
+    } as any,
+  }, async (args: any) => {
+    const text = await handleGetRecentNews(args, articleRepo, sentimentRepo);
+    return { content: [{ type: 'text' as const, text }] };
+  });
 
-        case 'search-news':
-          result = await handleSearchNews(args, searchService);
-          break;
+  server.registerTool('manage-sources', {
+    description: 'Add, update, or remove RSS feed sources',
+    inputSchema: {
+      action: z.enum(['add', 'update', 'delete', 'toggle']).describe('Action to perform'),
+      sourceId: z.number().optional().describe('Source ID (required for update/delete/toggle)'),
+      name: z.string().optional().describe('Source name (required for add)'),
+      rssUrl: z.string().optional().describe('RSS feed URL (required for add)'),
+      category: z.string().optional().describe('Source category'),
+      active: z.boolean().optional().describe('Whether source is active'),
+    } as any,
+  }, async (args: any) => {
+    const text = await handleManageSources(args, sourceRepo);
+    return { content: [{ type: 'text' as const, text }] };
+  });
 
-        case 'analyze-sentiment':
-          result = await handleAnalyzeSentiment(
-            args,
-            sentimentService,
-            articleRepo,
-            sentimentRepo
-          );
-          break;
+  server.registerTool('ask-sir-alex', {
+    description: 'Get wisdom from Sir Alex Ferguson and other famous football managers based on your question',
+    inputSchema: {
+      question: z.string().describe('Your question or topic to get manager wisdom about'),
+      limit: z.number().optional().describe('Number of quotes to return (default: 3)'),
+      minSimilarity: z.number().optional().describe('Minimum relevance score 0-1 (default: 0.3)'),
+    } as any,
+  }, async (args: any) => {
+    const text = await handleAskSirAlex(args, quoteSearchService);
+    return { content: [{ type: 'text' as const, text }] };
+  });
 
-        case 'list-sources':
-          result = await handleListSources(args, sourceRepo);
-          break;
+  server.registerTool('get-random-quote', {
+    description: 'Get a random quote from Sir Alex Ferguson or other famous managers (fast, no semantic search)',
+    inputSchema: {
+      manager: z.string().optional().describe('Filter by specific manager name'),
+    } as any,
+  }, async (args: any) => {
+    const text = await handleGetRandomQuote(args, quoteRepo);
+    return { content: [{ type: 'text' as const, text }] };
+  });
 
-        case 'get-recent-news':
-          result = await handleGetRecentNews(args, articleRepo, sentimentRepo);
-          break;
-
-        case 'manage-sources':
-          result = await handleManageSources(args, sourceRepo);
-          break;
-
-        case 'ask-sir-alex':
-          result = await handleAskSirAlex(args, quoteSearchService);
-          break;
-
-        case 'get-random-quote':
-          result = await handleGetRandomQuote(args, quoteRepo);
-          break;
-
-        case 'get-quotes-by-topic':
-          result = await handleGetQuotesByTopic(args, quoteRepo);
-          break;
-
-        default:
-          throw new Error(`Unknown tool: ${name}`);
-      }
-
-      return {
-        content: [{ type: 'text', text: result }],
-      };
-    } catch (error) {
-      const errorMessage =
-        error instanceof Error ? error.message : String(error);
-      logger.error('Tool execution failed', {
-        tool: name,
-        error: errorMessage,
-      });
-
-      return {
-        content: [
-          {
-            type: 'text',
-            text: JSON.stringify({ error: errorMessage }, null, 2),
-          },
-        ],
-        isError: true,
-      };
-    }
+  server.registerTool('get-quotes-by-topic', {
+    description: 'Get quotes categorized by topic (faster than semantic search, contextually relevant)',
+    inputSchema: {
+      topic: z.enum(['rivalry', 'passion', 'leadership', 'tactics', 'winning', 'motivation', 'philosophy']).describe('Quote topic'),
+      limit: z.number().optional().describe('Number of quotes to return (default: 5)'),
+    } as any,
+  }, async (args: any) => {
+    const text = await handleGetQuotesByTopic(args, quoteRepo);
+    return { content: [{ type: 'text' as const, text }] };
   });
 
   return server;
-}
+});
 
-function cleanupSessions(): void {
-  const now = Date.now();
-  const expired: string[] = [];
+const app = express();
 
-  for (const [sessionId, session] of sessions.entries()) {
-    if (now - session.lastActivity > SESSION_TIMEOUT) {
-      expired.push(sessionId);
-    }
+app.get('/health', (_req, res) => {
+  res.status(200).json({
+    status: 'ok',
+    service: 'soccer-news-mcp',
+    timestamp: new Date().toISOString(),
+  });
+});
+
+app.get('/ready', async (_req, res) => {
+  try {
+    const pool = getPool();
+    await pool.query('SELECT 1');
+    res.status(200).json({
+      status: 'ready',
+      service: 'soccer-news-mcp',
+      database: 'connected',
+    });
+  } catch (error) {
+    res.status(503).json({
+      status: 'not ready',
+      error: error instanceof Error ? error.message : String(error),
+    });
   }
+});
 
-  for (const sessionId of expired) {
-    const session = sessions.get(sessionId);
-    if (session) {
-      session.server.close().catch((err) => {
-        logger.error('Error closing session', { sessionId, error: err.message });
-      });
-      sessions.delete(sessionId);
-      logger.info('Session expired and cleaned up', { sessionId });
-    }
-  }
-}
+const nodeHandler = toNodeHandler(handler);
+app.all('/mcp', (req, res) => { void nodeHandler(req, res); });
 
-setInterval(cleanupSessions, 60000);
+const port = parseInt(process.env.PORT || '8080', 10);
 
 async function initializeServices(): Promise<void> {
   logger.info('Initializing services');
@@ -215,98 +208,12 @@ async function initializeServices(): Promise<void> {
   logger.info('All services initialized');
 }
 
-const app = express();
-app.use(express.json());
-
-app.get('/health', (req, res) => {
-  res.json({
-    status: 'healthy',
-    sessions: sessions.size,
-    timestamp: new Date().toISOString(),
-  });
-});
-
-app.get('/ready', async (req, res) => {
-  try {
-    const pool = getPool();
-    await pool.query('SELECT 1');
-    res.json({
-      status: 'ready',
-      database: 'connected',
-      timestamp: new Date().toISOString(),
-    });
-  } catch (error) {
-    res.status(503).json({
-      status: 'not ready',
-      error: error instanceof Error ? error.message : String(error),
-    });
-  }
-});
-
-app.post('/mcp', async (req, res) => {
-  const sessionId = req.headers['mcp-session-id'] as string;
-
-  if (!sessionId && req.body?.method === 'initialize') {
-    if (sessions.size >= 100) {
-      return res.status(503).json({ error: 'Session capacity reached' });
-    }
-
-    const newSessionId = `session-${Date.now()}-${Math.random().toString(36).substring(7)}`;
-    const server = createServer();
-    const transport = new StreamableHTTPServerTransport({
-      enableJsonResponse: true,
-      sessionIdGenerator: () => newSessionId,
-    });
-
-    server.onclose = () => {
-      sessions.delete(newSessionId);
-      logger.info('Session closed', { sessionId: newSessionId });
-    };
-
-    await server.connect(transport as any);
-    sessions.set(newSessionId, { server, transport, lastActivity: Date.now() });
-    res.setHeader('mcp-session-id', newSessionId);
-    await transport.handleRequest(req, res, req.body);
-  } else if (sessionId) {
-    const session = sessions.get(sessionId);
-    if (!session) return res.status(404).json({ error: 'Session not found' });
-    session.lastActivity = Date.now();
-    await session.transport.handleRequest(req, res, req.body);
-  } else {
-    res.status(400).json({ error: 'Session ID required' });
-  }
-});
-
-app.get('/mcp', async (req, res) => {
-  const sessionId = req.headers['mcp-session-id'] as string;
-  if (!sessionId) return res.status(400).json({ error: 'Session ID required' });
-  const session = sessions.get(sessionId);
-  if (!session) return res.status(404).json({ error: 'Session not found' });
-  session.lastActivity = Date.now();
-  await session.transport.handleRequest(req, res);
-});
-
-async function shutdown(): Promise<void> {
-  logger.info('Shutting down server');
-
-  for (const [sessionId, session] of sessions.entries()) {
-    await session.server.close();
-    logger.info('Session closed', { sessionId });
-  }
-
-  await closePool();
-  process.exit(0);
-}
-
-process.on('SIGTERM', shutdown);
-process.on('SIGINT', shutdown);
-
 (async () => {
   try {
     await initializeServices();
 
-    app.listen(PORT, () => {
-      logger.info('Soccer News MCP server started', { port: PORT });
+    app.listen(port, () => {
+      logger.info('Soccer News MCP server started', { port });
     });
   } catch (error) {
     logger.error('Failed to start server', {
@@ -315,3 +222,10 @@ process.on('SIGINT', shutdown);
     process.exit(1);
   }
 })();
+
+process.on('SIGTERM', async () => {
+  logger.info('Shutting down server');
+  await handler.close();
+  await closePool();
+  process.exit(0);
+});

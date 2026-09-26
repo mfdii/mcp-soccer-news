@@ -1,0 +1,10 @@
+---
+apiVersion: image.openshift.io/v1
+kind: ImageStream
+metadata:
+  name: soccer-news-mcp
+  labels:
+    app: soccer-news-mcp
+spec:
+  lookupPolicy:
+    local: true

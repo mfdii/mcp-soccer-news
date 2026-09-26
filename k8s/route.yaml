@@ -1,17 +1,14 @@
+---
 apiVersion: route.openshift.io/v1
 kind: Route
 metadata:
-  name: mcp-soccer-news
-  namespace: mcp-soccer-news
+  name: soccer-news-mcp
   labels:
-    app: mcp-soccer-news
-  annotations:
-    cert-manager.io/cluster-issuer: letsencrypt-prod
+    app: soccer-news-mcp
 spec:
-  host: soccer-news.example.com
   to:
     kind: Service
-    name: mcp-soccer-news
+    name: soccer-news-mcp
     weight: 100
   port:
     targetPort: http

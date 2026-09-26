@@ -1,0 +1,26 @@
+---
+apiVersion: build.openshift.io/v1
+kind: BuildConfig
+metadata:
+  name: soccer-news-mcp
+  labels:
+    app: soccer-news-mcp
+spec:
+  output:
+    to:
+      kind: ImageStreamTag
+      name: soccer-news-mcp:latest
+  source:
+    type: Git
+    git:
+      uri: https://github.com/mfdii/mcp-soccer-news.git
+      ref: mcp-v2-migration
+  strategy:
+    type: Docker
+    dockerStrategy:
+      dockerfilePath: Dockerfile
+  resources:
+    limits:
+      memory: 4Gi
+      cpu: "2"
+  triggers: []

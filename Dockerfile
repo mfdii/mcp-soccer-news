@@ -1,30 +1,14 @@
-FROM registry.access.redhat.com/ubi9/nodejs-20:latest
+FROM registry.access.redhat.com/hi/nodejs:26-builder AS builder
 
-USER root
-
-# Install build dependencies
-RUN dnf install -y python3 make g++ && dnf clean all
-
-USER 1001
-
-WORKDIR /opt/app-root/src
-
-# Copy package files
-COPY --chown=1001:0 package*.json tsconfig.json ./
-
-# Install dependencies
-RUN npm ci --production=false
-
-# Copy source code and scripts
-COPY --chown=1001:0 src/ ./src/
-COPY --chown=1001:0 scripts/ ./scripts/
-COPY --chown=1001:0 data/ ./data/
-
-# Build TypeScript
+WORKDIR /app
+COPY package*.json tsconfig.json ./
+RUN npm ci
+COPY src ./src
+COPY scripts ./scripts
+COPY data ./data
 RUN npm run build
 
 # Pre-download ML models to cache them in the image
-# This speeds up container startup significantly
 RUN node -e "import('@xenova/transformers').then(async m => { \
   const { pipeline, env } = m; \
   env.cacheDir = '/tmp/transformers-cache'; \
@@ -35,19 +19,22 @@ RUN node -e "import('@xenova/transformers').then(async m => { \
   console.log('Models cached successfully'); \
 })"
 
-# Copy cached models to persistent location
-RUN mkdir -p /opt/app-root/src/.transformers-cache && \
-    cp -r /tmp/transformers-cache/* /opt/app-root/src/.transformers-cache/ || true
+RUN mkdir -p /app/.transformers-cache && \
+    cp -r /tmp/transformers-cache/* /app/.transformers-cache/ || true
 
-# Set environment for model cache
-ENV MODEL_CACHE_PATH=/opt/app-root/src/.transformers-cache
+FROM registry.access.redhat.com/hi/nodejs:26
 
-# Expose port
-EXPOSE 3000
+WORKDIR /app
+COPY --from=builder /app/node_modules ./node_modules
+COPY --from=builder /app/dist ./dist
+COPY --from=builder /app/src ./src
+COPY --from=builder /app/scripts ./scripts
+COPY --from=builder /app/data ./data
+COPY --from=builder /app/.transformers-cache ./.transformers-cache
+COPY --from=builder /app/package.json ./
+COPY --from=builder /app/tsconfig.json ./
 
-# Health check
-HEALTHCHECK --interval=30s --timeout=10s --start-period=120s --retries=3 \
-  CMD node -e "require('http').get('http://localhost:3000/health', (res) => { process.exit(res.statusCode === 200 ? 0 : 1); }).on('error', () => { process.exit(1); });"
+EXPOSE 8080
+ENV PORT=8080 NODE_ENV=production MODEL_CACHE_PATH=/app/.transformers-cache
 
-# Start the server
-CMD ["npm", "start"]
+CMD ["node", "dist/server.js"]

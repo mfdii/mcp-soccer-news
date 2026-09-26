@@ -1,26 +1,24 @@
+---
 apiVersion: batch/v1
 kind: Job
 metadata:
   name: soccer-news-seed
-  namespace: mcp-soccer-news
   labels:
-    app: mcp-soccer-news
-    job: seed
+    app: soccer-news-mcp
 spec:
   template:
     metadata:
       labels:
-        app: mcp-soccer-news
+        app: soccer-news-mcp
         job: seed
     spec:
-      restartPolicy: OnFailure
       containers:
       - name: seed
-        image: image-registry.openshift-image-registry.svc:5000/mcp-soccer-news/mcp-soccer-news:latest
+        image: " "
         command: ["npm", "run", "seed"]
         envFrom:
         - secretRef:
-            name: mcp-soccer-news-env
+            name: soccer-news-env
         resources:
           requests:
             memory: "512Mi"
@@ -28,4 +26,5 @@ spec:
           limits:
             memory: "1Gi"
             cpu: "500m"
+      restartPolicy: OnFailure
   backoffLimit: 3

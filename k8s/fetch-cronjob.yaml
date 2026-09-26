@@ -1,0 +1,36 @@
+---
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: soccer-news-fetch
+  labels:
+    app: soccer-news-mcp
+spec:
+  schedule: "0 */3 * * *"
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      template:
+        metadata:
+          labels:
+            app: soccer-news-mcp
+            job: fetch-feeds
+        spec:
+          containers:
+          - name: fetch-feeds
+            image: " "
+            command: ["npm", "run", "fetch-feeds"]
+            envFrom:
+            - secretRef:
+                name: soccer-news-env
+            resources:
+              requests:
+                memory: "2Gi"
+                cpu: "500m"
+              limits:
+                memory: "4Gi"
+                cpu: "1000m"
+          restartPolicy: OnFailure
+      backoffLimit: 2

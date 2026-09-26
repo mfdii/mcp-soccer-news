@@ -1,0 +1,55 @@
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: soccer-news-mcp
+  labels:
+    app: soccer-news-mcp
+  annotations:
+    image.openshift.io/triggers: >-
+      [{"from":{"kind":"ImageStreamTag","name":"soccer-news-mcp:latest"},"fieldPath":"spec.template.spec.containers[?(@.name==\"soccer-news-mcp\")].image"}]
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: soccer-news-mcp
+  template:
+    metadata:
+      labels:
+        app: soccer-news-mcp
+    spec:
+      containers:
+      - name: soccer-news-mcp
+        image: " "
+        ports:
+        - containerPort: 8080
+          name: http
+        envFrom:
+        - secretRef:
+            name: soccer-news-env
+        resources:
+          requests:
+            memory: "2Gi"
+            cpu: "500m"
+          limits:
+            memory: "8Gi"
+            cpu: "2000m"
+        startupProbe:
+          httpGet:
+            path: /health
+            port: 8080
+          initialDelaySeconds: 60
+          periodSeconds: 10
+          failureThreshold: 30
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: 8080
+          initialDelaySeconds: 10
+          periodSeconds: 30
+        readinessProbe:
+          httpGet:
+            path: /ready
+            port: 8080
+          initialDelaySeconds: 10
+          periodSeconds: 10
