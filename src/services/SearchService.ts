@@ -48,7 +48,7 @@ export class SearchService {
   ): Promise<SearchResult[]> {
     const {
       limit = 10,
-      minSimilarity = 0.3,
+      minSimilarity = 0.5,
       sourceIds,
       dateTo,
       recency,
