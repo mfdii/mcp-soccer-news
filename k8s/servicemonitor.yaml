@@ -1,0 +1,16 @@
+---
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: soccer-news-mcp
+  labels:
+    app: soccer-news-mcp
+spec:
+  selector:
+    matchLabels:
+      app: soccer-news-mcp
+  endpoints:
+  - port: http
+    path: /metrics
+    interval: 30s
+    scrapeTimeout: 10s
