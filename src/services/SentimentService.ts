@@ -2,6 +2,7 @@ import { pipeline, env } from '@xenova/transformers';
 import { SentimentAnalysis } from '../types/sentiment.js';
 import { getModelConfig } from '../config/models.js';
 import { logger } from '../utils/logger.js';
+import { inferenceSemaphore } from './Semaphore.js';
 
 export class SentimentService {
   private model: any = null;
@@ -46,7 +47,7 @@ export class SentimentService {
 
     try {
       const truncatedText = text.substring(0, 512);
-      const output = await this.model(truncatedText);
+      const output: any = await inferenceSemaphore.run(() => this.model(truncatedText));
 
       const result = output[0];
       const duration = Date.now() - start;

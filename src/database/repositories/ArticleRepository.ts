@@ -97,7 +97,7 @@ export class ArticleRepository {
     sourceIds?: number[],
     dateFrom?: Date,
     dateTo?: Date,
-    sortBy: 'similarity' | 'date' = 'similarity'
+    sortBy: 'similarity' | 'date' = 'date'
   ): Promise<SearchResult[]> {
     let queryText = `SELECT * FROM articles WHERE embedding IS NOT NULL`;
     const params: unknown[] = [];
@@ -117,6 +117,8 @@ export class ArticleRepository {
       queryText += ` AND published_date <= $${paramIndex++}`;
       params.push(dateTo);
     }
+
+    queryText += ` ORDER BY published_date DESC`;
 
     const result = await query<any>(queryText, params);
 

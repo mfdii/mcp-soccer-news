@@ -61,17 +61,18 @@ const handler = createMcpHandler(() => {
   }));
 
   server.registerTool('search-news', {
-    description: 'Semantic search across stored articles using vector similarity',
+    description: 'Semantic search across stored articles using vector similarity. Defaults to last 30 days sorted by date (newest first). Use recency to widen or narrow the time window, or sortBy to rank by relevance instead.',
     inputSchema: {
       query: z.string().describe('Search query (natural language)'),
       limit: z.number().optional().describe('Maximum results to return (default: 10)'),
       minSimilarity: z.number().optional().describe('Minimum similarity score 0-1 (default: 0.3)'),
       sourceIds: z.array(z.number()).optional().describe('Filter by specific source IDs'),
-      dateFrom: z.string().optional().describe('Filter articles from this date (ISO format)'),
+      recency: z.enum(['last-24h', 'last-week', 'last-month', 'last-3-months', 'last-year', 'all-time']).optional().describe('Time window for results (default: last-month). Ignored if dateFrom/dateTo are set.'),
+      dateFrom: z.string().optional().describe('Filter articles from this date (ISO format). Overrides recency.'),
       dateTo: z.string().optional().describe('Filter articles until this date (ISO format)'),
       sentimentFilter: z.string().optional().describe('Filter by sentiment (positive, negative, neutral)'),
       includeSentiment: z.boolean().optional().describe('Include sentiment analysis in results'),
-      sortBy: z.enum(['similarity', 'date']).optional().describe('Sort results by similarity or date'),
+      sortBy: z.enum(['similarity', 'date']).optional().describe('Sort results by date (default, newest first) or similarity (relevance)'),
     } as any,
   }, withMetrics('search-news', async (args: any) => {
     const text = await handleSearchNews(args, searchService);

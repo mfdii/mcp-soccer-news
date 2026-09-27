@@ -4,12 +4,24 @@ import { SentimentRepository } from '../database/repositories/SentimentRepositor
 import { EmbeddingService } from './EmbeddingService.js';
 import { logger } from '../utils/logger.js';
 
+export type Recency = 'last-24h' | 'last-week' | 'last-month' | 'last-3-months' | 'last-year' | 'all-time';
+
+const RECENCY_DAYS: Record<Recency, number | null> = {
+  'last-24h': 1,
+  'last-week': 7,
+  'last-month': 30,
+  'last-3-months': 90,
+  'last-year': 365,
+  'all-time': null,
+};
+
 export interface SearchOptions {
   limit?: number;
   minSimilarity?: number;
   sourceIds?: number[];
   dateFrom?: Date;
   dateTo?: Date;
+  recency?: Recency;
   sentimentFilter?: string;
   includeSentiment?: boolean;
   sortBy?: 'similarity' | 'date';
@@ -36,16 +48,25 @@ export class SearchService {
   ): Promise<SearchResult[]> {
     const {
       limit = 10,
-      minSimilarity = 0.5,
+      minSimilarity = 0.3,
       sourceIds,
-      dateFrom,
       dateTo,
+      recency,
       sentimentFilter,
       includeSentiment = false,
-      sortBy = 'similarity',
+      sortBy = 'date',
     } = options;
 
-    logger.info('Searching articles', { query, limit, minSimilarity, sortBy });
+    let { dateFrom } = options;
+
+    if (!dateFrom && !dateTo) {
+      const days = recency ? RECENCY_DAYS[recency] : 30;
+      if (days !== null) {
+        dateFrom = new Date(Date.now() - days * 86_400_000);
+      }
+    }
+
+    logger.info('Searching articles', { query, limit, minSimilarity, sortBy, dateFrom: dateFrom?.toISOString() });
     const start = Date.now();
 
     const embeddingResult = await this.embeddingService.generateEmbedding(query);

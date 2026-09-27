@@ -2,6 +2,7 @@ import { pipeline, env } from '@xenova/transformers';
 import { EmbeddingResult } from '../types/embedding.js';
 import { getModelConfig } from '../config/models.js';
 import { logger } from '../utils/logger.js';
+import { inferenceSemaphore } from './Semaphore.js';
 
 export class EmbeddingService {
   private model: any = null;
@@ -50,10 +51,9 @@ export class EmbeddingService {
     const start = Date.now();
 
     try {
-      const output = await this.model(text, {
-        pooling: 'mean',
-        normalize: true,
-      });
+      const output: any = await inferenceSemaphore.run(() =>
+        this.model(text, { pooling: 'mean', normalize: true })
+      );
 
       const embedding = Array.from(output.data) as number[];
       const duration = Date.now() - start;
